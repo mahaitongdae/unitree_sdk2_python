@@ -34,8 +34,15 @@ TRIGERLEVEL = 0xF0
 PosStopF = 2.146e9
 VelStopF = 16000.0
 
+
+
 DOG_NAME = 'enxa0cec86c58dc'
 crc = CRC()
+
+JOINT_LIMIT = np.array([       # Hip, Thigh, Calf
+        [-1.047,    -0.663,      -2.9],  # MIN
+        [1.047,     2.966,       -0.837]  # MAX
+    ])
 
 def quaternion_inverse_rotate (quaternion, vector):
     # quaternion is (w, x, y, z)
@@ -180,6 +187,12 @@ class ObsHandler(object):
         return action
 
 class Controller(object):
+    STAND = np.array([
+        -0.02452479861676693, 0.8545529842376709, -1.675719976425171,
+        -0.02452479861676693, 0.8545529842376709, -1.675719976425171,
+        -0.02452479861676693, 0.8545529842376709, -1.675719976425171,
+        -0.02452479861676693, 0.8545529842376709, -1.675719976425171
+    ])
     def __init__(self):
         self.pub = ChannelPublisher("rt/lowcmd", LowCmd_)
         self.pub.Init()
@@ -197,6 +210,29 @@ class Controller(object):
             self.cmd.motor_cmd[i].tau = 0
 
     def control(self, action):
+
+        while True:
+
+            # Poinstion(rad) control, set RL_0 rad
+            for i, joint_pos in enumerate(action):
+                self.cmd.motor_cmd[i].q = joint_pos  # Taregt angular(rad)
+                self.cmd.motor_cmd[i].kp = 10.0  # Poinstion(rad) control kp gain
+                self.cmd.motor_cmd[i].dq = 0.0  # Taregt angular velocity(rad/ss)
+                self.cmd.motor_cmd[i].kd = 0.5  # Poinstion(rad) control kd gain
+                self.cmd.motor_cmd[i].tau = 0.0  # Feedforward toque 1N.m
+
+            self.cmd.crc = crc.Crc(self.cmd)
+
+            # Publish message
+            if self.pub.Write(self.cmd):
+                print("Publish success. msg:", self.cmd.crc)
+                break
+            else:
+                print("Waitting for subscriber.")
+
+            time.sleep(0.002)
+
+    def stand(self, action):
 
         while True:
 
@@ -251,7 +287,7 @@ if __name__ == "__main__":
             controller.soft_emergency_stop()
         else:
             action = obs_handle.get_action()
-            controller.control(action)
+            controller.control(controller.STAND)
         time.sleep(0.005)  # Adding a small delay to avoid high CPU usage
 
 
