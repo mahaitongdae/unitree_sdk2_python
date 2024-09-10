@@ -35,19 +35,20 @@ if __name__ == '__main__':
         cmd.motor_cmd[i].tau = 0
 
     while True:        
-        # Toque controle, set RL_2 toque
-        cmd.motor_cmd[go2.LegID["RL_2"]].q = 0.0 # Set to stop position(rad)
-        cmd.motor_cmd[go2.LegID["RL_2"]].kp = 0.0
-        cmd.motor_cmd[go2.LegID["RL_2"]].dq = 0.0 # Set to stop angular velocity(rad/s)
-        cmd.motor_cmd[go2.LegID["RL_2"]].kd = 0.0
-        cmd.motor_cmd[go2.LegID["RL_2"]].tau = 1.0 # target toque is set to 1N.m
+        # # Toque controle, set RL_2 toque
+        # cmd.motor_cmd[go2.LegID["RL_2"]].q = 0.0 # Set to stop position(rad)
+        # cmd.motor_cmd[go2.LegID["RL_2"]].kp = 0.0
+        # cmd.motor_cmd[go2.LegID["RL_2"]].dq = 0.0 # Set to stop angular velocity(rad/s)
+        # cmd.motor_cmd[go2.LegID["RL_2"]].kd = 0.0
+        # cmd.motor_cmd[go2.LegID["RL_2"]].tau = 1.0 # target toque is set to 1N.m
 
         # Poinstion(rad) control, set RL_0 rad
-        cmd.motor_cmd[go2.LegID["RL_0"]].q = 0.0  # Taregt angular(rad)
-        cmd.motor_cmd[go2.LegID["RL_0"]].kp = 10.0 # Poinstion(rad) control kp gain
-        cmd.motor_cmd[go2.LegID["RL_0"]].dq = 0.0  # Taregt angular velocity(rad/ss)
-        cmd.motor_cmd[go2.LegID["RL_0"]].kd = 1.0  # Poinstion(rad) control kd gain
-        cmd.motor_cmd[go2.LegID["RL_0"]].tau = 0.0 # Feedforward toque 1N.m
+        joint_to_control = "RL_0"
+        cmd.motor_cmd[go2.LegID[joint_to_control]].q = 0.0  # Taregt angular(rad)
+        cmd.motor_cmd[go2.LegID[joint_to_control]].kp = 10.0 # Poinstion(rad) control kp gain
+        cmd.motor_cmd[go2.LegID[joint_to_control]].dq = 0.0  # Taregt angular velocity(rad/ss)
+        cmd.motor_cmd[go2.LegID[joint_to_control]].kd = 1.0  # Poinstion(rad) control kd gain
+        cmd.motor_cmd[go2.LegID[joint_to_control]].tau = 0.0 # Feedforward toque 1N.m
         
         cmd.crc = crc.Crc(cmd)
 

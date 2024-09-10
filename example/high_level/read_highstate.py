@@ -7,11 +7,11 @@ from unitree_sdk2py.idl.unitree_go.msg.dds_ import SportModeState_
 
 
 def HighStateHandler(msg: SportModeState_):
-    print("Position: ", msg.position)
+    # print("Position: ", msg.position)
     print("Velocity: ", msg.velocity)
-    print("Yaw velocity: ", msg.yaw_speed)
-    print("Foot position in body frame: ", msg.foot_position_body)
-    print("Foot velocity in body frame: ", msg.foot_speed_body)
+    # print("Yaw velocity: ", msg.yaw_speed)
+    # print("Foot position in body frame: ", msg.foot_position_body)
+    # print("Foot velocity in body frame: ", msg.foot_speed_body)
 
 
 if __name__ == "__main__":

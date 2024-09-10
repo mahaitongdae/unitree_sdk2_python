@@ -3,7 +3,7 @@ from unitree_sdk2py.core.channel import ChannelFactoryInitialize
 from unitree_sdk2py.go2.robot_state.robot_state_client import RobotStateClient
 
 if __name__ == "__main__":
-    ChannelFactoryInitialize(0, "enx000ec6768747")
+    ChannelFactoryInitialize(0, "enxa0cec86c58dc")
     rsc = RobotStateClient()
     rsc.SetTimeout(3.0)
     rsc.Init()
@@ -32,13 +32,13 @@ if __name__ == "__main__":
         time.sleep(3)
 
         print("##################ServiceSwitch###################")
-        code = rsc.ServiceSwitch("sport_mode", False)
-        if code != 0:
-            print("service stop sport_mode error. code:", code)
-        else:
-            print("service stop sport_mode success. code:", code)
+        # code = rsc.ServiceSwitch("sport_mode", False)
+        # if code != 0:
+        #     print("service stop sport_mode error. code:", code)
+        # else:
+        #     print("service stop sport_mode success. code:", code)
 
-        time.sleep(1)
+        # time.sleep(1)
 
         code = rsc.ServiceSwitch("sport_mode", True)
         if code != 0:
