@@ -40,11 +40,11 @@ if __name__ == "__main__":
 
         # time.sleep(1)
 
-        code = rsc.ServiceSwitch("sport_mode", True)
-        if code != 0:
-            print("service start sport_mode error. code:", code)
-        else:
-            print("service start sport_mode success. code:", code)
+        # code = rsc.ServiceSwitch("sport_mode", True)
+        # if code != 0:
+        #     print("service start sport_mode error. code:", code)
+        # else:
+        #     print("service start sport_mode success. code:", code)
         
-        time.sleep(3)
+        # time.sleep(3)
 

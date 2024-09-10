@@ -34,3 +34,5 @@ __pycache__
 
 # JetBrains IDE
 .idea/
+example/model
+example/*.npz

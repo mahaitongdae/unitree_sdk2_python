@@ -39,6 +39,16 @@ TRIGERLEVEL = 0xF0
 PosStopF = 2.146e9
 VelStopF = 16000.0
 
+STAND = np.array([
+        -0.0, 0.8, -1.5,
+        -0.0, 0.8, -1.5,
+        -0.0, 0.8, -1.5,
+        -0.0, 0.8, -1.5
+    ])
+
+FREQ = 100
+DT = 1./FREQ
+
 
 
 DOG_NAME = 'enxa0cec86c58dc'
@@ -157,6 +167,8 @@ class ObsHandler(object):
         # self.offsetGo2 = convertJointOrderIsaacToGo2(self.offsetIsaac)
         # print(self.offsetGo2)
         self.scale = 0.25
+        self.last_state = None
+        self.last_joint_angle = None
         self.lowStateSub = ChannelSubscriber("rt/lowstate", LowState_)
         self.highStateSub.Init(self.HighStateHandler, 10)
         self.lowStateSub.Init(self.LowStateHandler, 10)
@@ -176,19 +188,57 @@ class ObsHandler(object):
         joint_vel = [msg.motor_state[id].dq for id in range(12)]
         return ang_vel, quat, joint_angle, joint_vel
 
-    def get_state(self, velo_command = np.array([0.3, 0.3, 0.3])):
+    def get_state(self):
         # base_lin_vel_b
         base_lin_vel_w = self.velocity[-1]
         ang_vel_w, quat, joint_angle, joint_vel = self.getStateFromLowLevelMsg(self.lowStateQueue[-1])
-        obs = np.empty([1, 48])
-        obs[:, :3] = quaternion_inverse_rotate(quat, base_lin_vel_w)
-        obs[:, 3:6] = quaternion_inverse_rotate(quat, ang_vel_w)
+        obs = np.empty([1, 33])
+        obs[:, :3] = base_lin_vel_w
+        obs[:, 3:6] = ang_vel_w
         obs[:, 6:9] = quaternion_inverse_rotate(quat, np.array([0.0, 0.0, -1.0]))
-        obs[:, 9:12] = velo_command
-        obs[:, 12:24] = convertJointOrderGo2ToIsaac(joint_angle)
-        obs[:, 24:36] = convertJointOrderGo2ToIsaac(joint_vel)
-        obs[:, 36:48] = self.last_action
-        return obs
+        # obs[:, 9:12] = velo_command
+        obs[:, 9:21] = joint_angle - STAND # relative obs # convertJointOrderGo2ToIsaac(joint_angle)
+        obs[:, 21:33] = joint_vel # convertJointOrderGo2ToIsaac(joint_vel)
+        return obs, joint_angle
+    
+    def get_joint_diff(self, joint_pos):
+        diff = []
+        for i in range(len(joint)):
+            diff.append(joint[i] - self.last_joint_angle[i])
+        return diff
+    
+    def init_last(self):
+        if self.last_state is None:
+            state, joint_pos = self.get_state()
+            self.last_state = state
+            self.last_joint_angle = joint_pos
+            time.sleep(DT)
+    
+    def get_transition(self):
+        states = []
+        actions = []
+        next_states = []
+        self.init_last()
+        for i in range(1000):
+            state = self.last_state
+            next_state, joint_angle = self.get_state()
+            action = self.get_joint_diff(joint_angle)
+            states.append(state)
+            actions.append(action)
+            next_states.append(next_state)
+            self.last_state = next_state
+            self.last_joint_angle = joint_angle
+            time.sleep(DT)
+        states = np.concatenate(states, axis=0)
+        actions = np.vstack(actions)
+        next_states = np.concatenate(next_states, axis=0)
+        print(states.shape, actions.shape, next_states.shape)
+        print("Collected 1000 transitions!")
+        filename = input("Please enter the filename (without extension): ")
+        np.savez_compressed(f'{filename}.npz', expert_state=states, 
+                            expert_actions=actions, expert_next_states=next_states)
+        print(f"Arrays saved to {filename}.npz")
+           
     
     def get_joint_pos(self):
         ang_vel_w, quat, joint_angle, joint_vel = self.getStateFromLowLevelMsg(self.lowStateQueue[-1])
@@ -350,30 +400,49 @@ if __name__ == "__main__":
     obs_handle = ObsHandler()
     time.sleep(2)
     controller = Controller()
+    first_run = True
     
     while True:
         key = get_key(key_settings)
         emergency_stop(key)
+        if first_run:
+            obs_handle.init_last()
+            first_run = False
+            print("initialize")
         if key is not None:
             # pass
             break
         else:
-            print("Current State:", obs_handle.get_state())
+            # print("Current State:", obs_handle.get_state()[0])
+            _, joint = obs_handle.get_state()
+            print("Current joint:", joint)
+            print("Joint diff:", obs_handle.get_joint_diff(joint))
             print("Press Space for emergency stop, 1 to exit, other to proceed.")
-        time.sleep(0.005)  # Adding a small delay to avoid high CPU usage
+        time.sleep(DT)  # Adding a small delay to avoid high CPU usage
     print('Start to walk')
+    first_run = True
     while True:
         key = get_key(key_settings)
         emergency_stop(key)
-        isaacAction = obs_handle.get_action(velo_command=[0.0, 0.3, 0.0])
-        go2Action = controller.convertIsaacAction2Go2Action(isaacAction)
-        jointAngles = obs_handle.get_joint_pos()
-        # controller.controlIsaacAction(isaacAction)
-        print('Diff GO2:', jointAngles - go2Action)
-        print('Action isaac:',isaacAction)
-        # print(obs_handle.get_state())
-        obs_handle.update_action(isaacAction)
+        if first_run:
+            obs_handle.init_last()
+            first_run = False
+            print("initialize")
+            print("Press Space for emergency stop, 1 to exit, r to start collection")
+        if key == 'r':
+            obs_handle.get_transition()
+        else:
+            pass
+        # isaacAction = obs_handle.get_action(velo_command=[0.0, 0.3, 0.0])
+        # go2Action = controller.convertIsaacAction2Go2Action(isaacAction)
+        # jointAngles = obs_handle.get_joint_pos()
+        # # controller.controlIsaacAction(isaacAction)
+        # print('Diff GO2:', jointAngles - go2Action)
+        # print('Action isaac:',isaacAction)
+        # # print(obs_handle.get_state())
+        # obs_handle.update_action(isaacAction)
         time.sleep(0.02)
+
 
 
     
