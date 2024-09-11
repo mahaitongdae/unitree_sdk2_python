@@ -49,6 +49,12 @@ JOINT_LIMIT = np.array([       # Hip, Thigh, Calf
         [1.047,     2.966,       -0.837]  # MAX
     ])
 
+ISAAC_OFFSET = np.array([       # Hip, Thigh, Calf
+        0.1, -0.1, 0.1, -0.1,
+        0.8, 0.8, 1.0, 1.0,
+        -1.5, -1.5, -1.5, -1.5,
+    ])
+
 def emergency_stop(key): 
     if key == ' ':
         code = controller.rsc.ServiceSwitch("sport_mode", False)
@@ -185,7 +191,7 @@ class ObsHandler(object):
         obs[:, 3:6] = quaternion_inverse_rotate(quat, ang_vel_w)
         obs[:, 6:9] = quaternion_inverse_rotate(quat, np.array([0.0, 0.0, -1.0]))
         obs[:, 9:12] = velo_command
-        obs[:, 12:24] = convertJointOrderGo2ToIsaac(joint_angle)
+        obs[:, 12:24] = convertJointOrderGo2ToIsaac(joint_angle) - ISAAC_OFFSET
         obs[:, 24:36] = convertJointOrderGo2ToIsaac(joint_vel)
         obs[:, 36:48] = self.last_action
         return obs
@@ -201,9 +207,8 @@ class ObsHandler(object):
 
     def get_action(self, velo_command = np.array([0.3, 0.3, 0.3])):
         state = self.get_state(velo_command)
-        output = self.onnx_inference(state.astype(np.float32))
-        # action = self.convert_action(output)
-        return output
+        isaac_output = self.onnx_inference(state.astype(np.float32))
+        return isaac_output
 
     def update_action(self, raw_action):
         self.last_action = raw_action
@@ -240,9 +245,9 @@ class Controller(object):
             self.cmd.motor_cmd[i].kd = 0
             self.cmd.motor_cmd[i].tau = 0
         self.sportsModeDisabled = False
-        self.offsetIsaac = np.array([0.1, -0.1, 0.1, -0.1,
-                                     0.8, 0.8, 1.0, 1.0,
-                                     -1.5, -1.5, -1.5, -1.5])
+        # self.offsetIsaac = np.array([0.1, -0.1, 0.1, -0.1,
+        #                              0.8, 0.8, 1.0, 1.0,
+        #                              -1.5, -1.5, -1.5, -1.5])
     
     def verifySportsMode(self):
         if not self.sportsModeDisabled:
@@ -278,8 +283,8 @@ class Controller(object):
     
     def convertIsaacAction2Go2Action(self, isaacAction):
         scaled_action = 0.25 * isaacAction
-        abs_action = scaled_action + self.offsetIsaac
-        absActionGo2 = convertJointOrderIsaacToGo2(scaled_action)
+        abs_action = scaled_action + ISAAC_OFFSET
+        absActionGo2 = convertJointOrderIsaacToGo2(abs_action)
         return absActionGo2
 
     def stop(self):
