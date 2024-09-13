@@ -36,3 +36,6 @@ __pycache__
 .idea/
 example/model
 example/*.npz
+
+*.pyc
+*.swp

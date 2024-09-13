@@ -5,7 +5,7 @@ from unitree_sdk2py.core.channel import ChannelSubscriber, ChannelFactoryInitial
 from unitree_sdk2py.idl.default import unitree_go_msg_dds__SportModeState_
 from unitree_sdk2py.idl.unitree_go.msg.dds_ import SportModeState_, LowState_
 from collections import deque
-import keyboard
+# import keyboard
 import onnxruntime as ort
 from unitree_sdk2py.go2.robot_state.robot_state_client import RobotStateClient
 from unitree_sdk2py.core.channel import ChannelPublisher
@@ -32,7 +32,7 @@ LegID = {
     "RL_1": 10,
     "RL_2": 11,
 }
-onnx_model_path = '/home/mht/unitree/unitree_sdk2_python/example/model/unitree_go2_flat/policy.onnx'
+onnx_model_path = './model/onnx/policy091213.onnx'
 HIGHLEVEL = 0xEE
 LOWLEVEL = 0xFF
 TRIGERLEVEL = 0xF0
@@ -51,7 +51,7 @@ DT = 1./FREQ
 
 
 
-DOG_NAME = 'enxa0cec86c58dc'
+DOG_NAME = 'eth0'
 crc = CRC()
 
 JOINT_LIMIT = np.array([       # Hip, Thigh, Calf
@@ -161,9 +161,9 @@ class ObsHandler(object):
 
         self.last_action = [0.0] * 12
         
-        self.session = ort.InferenceSession(onnx_model_path)
+        # self.session = ort.InferenceSession(onnx_model_path)
         # Get the model's input name
-        self.input_name = self.session.get_inputs()[0].name
+        # self.input_name = self.session.get_inputs()[0].name
         # self.offsetGo2 = convertJointOrderIsaacToGo2(self.offsetIsaac)
         # print(self.offsetGo2)
         self.scale = 0.25
@@ -190,15 +190,18 @@ class ObsHandler(object):
 
     def get_state(self):
         # base_lin_vel_b
+        # if self.last_state is None:
+        #     print("pause one time step to init last state")
         base_lin_vel_w = self.velocity[-1]
         ang_vel_w, quat, joint_angle, joint_vel = self.getStateFromLowLevelMsg(self.lowStateQueue[-1])
-        obs = np.empty([1, 33])
+        obs = np.empty([1, 46])
         obs[:, :3] = base_lin_vel_w
         obs[:, 3:6] = ang_vel_w
-        obs[:, 6:9] = quaternion_inverse_rotate(quat, np.array([0.0, 0.0, -1.0]))
+        obs[:, 6:10] = quat # quaternion_inverse_rotate(quat, np.array([0.0, 0.0, -1.0]))
         # obs[:, 9:12] = velo_command
-        obs[:, 9:21] = joint_angle - STAND # relative obs # convertJointOrderGo2ToIsaac(joint_angle)
-        obs[:, 21:33] = joint_vel # convertJointOrderGo2ToIsaac(joint_vel)
+        obs[:, 10:22] = joint_angle #  - STAND # relative obs # convertJointOrderGo2ToIsaac(joint_angle)
+        obs[:, 22:34] = joint_vel # convertJointOrderGo2ToIsaac(joint_vel)
+        obs[:, 34:46] = np.array(joint_angle) - np.array(self.last_joint_angle)
         return obs, joint_angle
     
     def get_joint_diff(self, joint_pos):
@@ -209,16 +212,22 @@ class ObsHandler(object):
     
     def init_last(self):
         if self.last_state is None:
-            state, joint_pos = self.get_state()
-            self.last_state = state
+            joint_pos = self.get_joint_pos()
             self.last_joint_angle = joint_pos
+            time.sleep(DT)
+            '''
+            need to initilalized twice since we have others in the observation.
+            '''
+            self.last_state, self.last_joint_angle = self.get_state()
             time.sleep(DT)
     
     def get_transition(self):
+        print('Start data collection!')
         states = []
         actions = []
         next_states = []
         self.init_last()
+        start = time.time()
         for i in range(1000):
             state = self.last_state
             next_state, joint_angle = self.get_state()
@@ -229,6 +238,7 @@ class ObsHandler(object):
             self.last_state = next_state
             self.last_joint_angle = joint_angle
             time.sleep(DT)
+        print(f"Collection finished! time cost: {time.time() - start}")
         states = np.concatenate(states, axis=0)
         actions = np.vstack(actions)
         next_states = np.concatenate(next_states, axis=0)
@@ -244,19 +254,19 @@ class ObsHandler(object):
         ang_vel_w, quat, joint_angle, joint_vel = self.getStateFromLowLevelMsg(self.lowStateQueue[-1])
         return joint_angle
 
-    def onnx_inference(self, input):
-        if len(input.shape) == 0:
-            input = np.expand_dims(input, axis=0)
-        return self.session.run(None, {self.input_name: input})[0][0]
+    # def onnx_inference(self, input):
+    #     if len(input.shape) == 0:
+    #         input = np.expand_dims(input, axis=0)
+    #     return self.session.run(None, {self.input_name: input})[0][0]
 
-    def get_action(self, velo_command = np.array([0.3, 0.3, 0.3])):
-        state = self.get_state(velo_command)
-        output = self.onnx_inference(state.astype(np.float32))
-        # action = self.convert_action(output)
-        return output
+    # def get_action(self, velo_command = np.array([0.3, 0.3, 0.3])):
+    #     state = self.get_state(velo_command)
+    #     output = self.onnx_inference(state.astype(np.float32))
+    #     # action = self.convert_action(output)
+    #     return output
 
-    def update_action(self, raw_action):
-        self.last_action = raw_action
+    # def update_action(self, raw_action):
+    #     self.last_action = raw_action
 
 class Controller(object):
     STAND = np.array([
@@ -413,6 +423,7 @@ if __name__ == "__main__":
             # pass
             break
         else:
+            obs_handle.init_last()
             # print("Current State:", obs_handle.get_state()[0])
             _, joint = obs_handle.get_state()
             print("Current joint:", joint)
@@ -430,9 +441,9 @@ if __name__ == "__main__":
             print("initialize")
             print("Press Space for emergency stop, 1 to exit, r to start collection")
         if key == 'r':
-            start = time.time()
+            
             obs_handle.get_transition()
-            Print(f"Collection finished! time cost: {time.time() - start}")
+            
         else:
             pass
         # isaacAction = obs_handle.get_action(velo_command=[0.0, 0.3, 0.0])

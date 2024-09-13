@@ -5,7 +5,7 @@ from unitree_sdk2py.core.channel import ChannelSubscriber, ChannelFactoryInitial
 from unitree_sdk2py.idl.default import unitree_go_msg_dds__SportModeState_
 from unitree_sdk2py.idl.unitree_go.msg.dds_ import SportModeState_, LowState_
 from collections import deque
-import keyboard
+# import keyboard
 import onnxruntime as ort
 from unitree_sdk2py.go2.robot_state.robot_state_client import RobotStateClient
 from unitree_sdk2py.core.channel import ChannelPublisher
@@ -32,7 +32,7 @@ LegID = {
     "RL_1": 10,
     "RL_2": 11,
 }
-onnx_model_path = '/home/mht/unitree/unitree_sdk2_python/example/model/unitree_go2_flat/policy.onnx'
+onnx_model_path = './model/onnx/policy091300_fric_13.onnx'
 HIGHLEVEL = 0xEE
 LOWLEVEL = 0xFF
 TRIGERLEVEL = 0xF0
@@ -41,7 +41,7 @@ VelStopF = 16000.0
 
 
 
-DOG_NAME = 'enxa0cec86c58dc'
+DOG_NAME = 'eth0'
 crc = CRC()
 
 JOINT_LIMIT = np.array([       # Hip, Thigh, Calf
@@ -187,8 +187,8 @@ class ObsHandler(object):
         base_lin_vel_w = self.velocity[-1]
         ang_vel_w, quat, joint_angle, joint_vel = self.getStateFromLowLevelMsg(self.lowStateQueue[-1])
         obs = np.empty([1, 48])
-        obs[:, :3] = quaternion_inverse_rotate(quat, base_lin_vel_w)
-        obs[:, 3:6] = quaternion_inverse_rotate(quat, ang_vel_w)
+        obs[:, :3] = base_lin_vel_w # quaternion_inverse_rotate(quat, )
+        obs[:, 3:6] = ang_vel_w # quaternion_inverse_rotate(quat, )
         obs[:, 6:9] = quaternion_inverse_rotate(quat, np.array([0.0, 0.0, -1.0]))
         obs[:, 9:12] = velo_command
         obs[:, 12:24] = convertJointOrderGo2ToIsaac(joint_angle) - ISAAC_OFFSET
@@ -267,9 +267,9 @@ class Controller(object):
         # Poinstion(rad) control, set RL_0 rad
         for i, joint_pos in enumerate(action):
             self.cmd.motor_cmd[i].q = joint_pos  # Taregt angular(rad)
-            self.cmd.motor_cmd[i].kp = 30.0  # Poinstion(rad) control kp gain
+            self.cmd.motor_cmd[i].kp = 35.0  # Poinstion(rad) control kp gain
             self.cmd.motor_cmd[i].dq = 0.0  # Taregt angular velocity(rad/ss)
-            self.cmd.motor_cmd[i].kd = 0.5  # Poinstion(rad) control kd gain
+            self.cmd.motor_cmd[i].kd = 0.2  # Poinstion(rad) control kd gain
             self.cmd.motor_cmd[i].tau = 0.0  # Feedforward toque 1N.m
 
         self.cmd.crc = crc.Crc(self.cmd)
@@ -363,21 +363,24 @@ if __name__ == "__main__":
             # pass
             break
         else:
-            print("Current State:", obs_handle.get_state())
+            print("Current State:", obs_handle.get_state(velo_command=[0.0,0.0,0.0])[0])
+            action = obs_handle.get_action(velo_command=[0.8,0.0,0.0])
+            print("Current Action: ", action)
+            # obs_handle.update_action(action)
             print("Press Space for emergency stop, 1 to exit, other to proceed.")
         time.sleep(0.005)  # Adding a small delay to avoid high CPU usage
     print('Start to walk')
     while True:
         key = get_key(key_settings)
         emergency_stop(key)
-        isaacAction = obs_handle.get_action(velo_command=[0.5, 0.0, 0.0])
+        isaacAction = obs_handle.get_action(velo_command=[0.6, 0.0, 0.0])
         go2Action = controller.convertIsaacAction2Go2Action(isaacAction)
-        jointAngles = obs_handle.get_joint_pos()
+        # jointAngles = obs_handle.get_joint_pos()
         controller.verifySportsMode()
         controller.controlIsaacAction(isaacAction)
         # print('Diff GO2:', jointAngles - go2Action)
         # print('Action isaac:',isaacAction)
-        # print(obs_handle.get_state())
+        print(obs_handle.get_state())
         obs_handle.update_action(isaacAction)
         time.sleep(0.02)
 
