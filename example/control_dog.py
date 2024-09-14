@@ -32,7 +32,7 @@ LegID = {
     "RL_1": 10,
     "RL_2": 11,
 }
-onnx_model_path = './model/onnx/policy091300_fric_13.onnx'
+onnx_model_path = './model/onnx/policy_isgym_091313.onnx'
 HIGHLEVEL = 0xEE
 LOWLEVEL = 0xFF
 TRIGERLEVEL = 0xF0
@@ -44,15 +44,30 @@ VelStopF = 16000.0
 DOG_NAME = 'eth0'
 crc = CRC()
 
+JOINT_LIMIT_LOW = np.array([
+        -0.77, -0.663, -2.9,     # FL
+        -0.77, -0.663, -2.9,    # FR
+        -0.82, -0.663, -2.9,     # RL
+        -0.82, -0.663, -2.9,]    # RR
+)
+
+JOINT_LIMIT_HIGH = np.array([
+        0.77, 2.966, -0.837,     # FL
+        0.77, 2.966, -0.837,    # FR
+        0.82, 2.966, -0.837,     # RL
+        0.82, 2.966, -0.837,]    # RR
+)
+
 JOINT_LIMIT = np.array([       # Hip, Thigh, Calf
         [-1.047,    -0.663,      -2.9],  # MIN
         [1.047,     2.966,       -0.837]  # MAX
     ])
 
 ISAAC_OFFSET = np.array([       # Hip, Thigh, Calf
-        0.1, -0.1, 0.1, -0.1,
-        0.8, 0.8, 1.0, 1.0,
-        -1.5, -1.5, -1.5, -1.5,
+        0.1, 0.8, -1.5,     # FL
+        -0.1, 0.8, -1.5,    # FR
+        0.1, 1.0, -1.5,     # RL
+        -0.1, 1.0, -1.5,    # RR
     ])
 
 def emergency_stop(key): 
@@ -110,38 +125,39 @@ def convertJointOrderIsaacToGo2(IsaacGymJoint):
     '''
     Go2Joint = np.empty_like(IsaacGymJoint)
     Go2Joint[LegID["FL_0"]] = IsaacGymJoint[0]
-    Go2Joint[LegID["FR_0"]] = IsaacGymJoint[1]
-    Go2Joint[LegID["RL_0"]] = IsaacGymJoint[2]
-    Go2Joint[LegID["RR_0"]] = IsaacGymJoint[3]
-    Go2Joint[LegID["FL_1"]] = IsaacGymJoint[4]
-    Go2Joint[LegID["FR_1"]] = IsaacGymJoint[5]
-    Go2Joint[LegID["RL_1"]] = IsaacGymJoint[6]
-    Go2Joint[LegID["RR_1"]] = IsaacGymJoint[7]
-    Go2Joint[LegID["FL_2"]] = IsaacGymJoint[8]
-    Go2Joint[LegID["FR_2"]] = IsaacGymJoint[9]
-    Go2Joint[LegID["RL_2"]] = IsaacGymJoint[10]
+    Go2Joint[LegID["FL_1"]] = IsaacGymJoint[1]
+    Go2Joint[LegID["FL_2"]] = IsaacGymJoint[2]
+    Go2Joint[LegID["FR_0"]] = IsaacGymJoint[3]
+    Go2Joint[LegID["FR_1"]] = IsaacGymJoint[4]
+    Go2Joint[LegID["FR_2"]] = IsaacGymJoint[5]
+    Go2Joint[LegID["RL_0"]] = IsaacGymJoint[6]
+    Go2Joint[LegID["RL_1"]] = IsaacGymJoint[7]
+    Go2Joint[LegID["RL_2"]] = IsaacGymJoint[8]
+    Go2Joint[LegID["RR_0"]] = IsaacGymJoint[9]
+    Go2Joint[LegID["RR_1"]] = IsaacGymJoint[10]
     Go2Joint[LegID["RR_2"]] = IsaacGymJoint[11]
     return Go2Joint
 
 def convertJointOrderGo2ToIsaac(Go2Joint):
     '''
-    isaac gym: flhip, frhip, rlhip, rrhip,
-                flthigh, frthigh, rlthigh, rrthigh,
-                fl, fr, rl, rr calf
+    isaac gym: FLhip, flthigh, flcalf;
+               FR;
+               RL;
+               RR
     go2: 0 for hip, 1 for thigh, 2 for calf
     '''
     IsaacGymJoint = np.empty_like(Go2Joint)
     IsaacGymJoint[0] = Go2Joint[LegID["FL_0"]]
-    IsaacGymJoint[1] = Go2Joint[LegID["FR_0"]]
-    IsaacGymJoint[2] = Go2Joint[LegID["RL_0"]]
-    IsaacGymJoint[3] = Go2Joint[LegID["RR_0"]]
-    IsaacGymJoint[4] = Go2Joint[LegID["FL_1"]]
-    IsaacGymJoint[5] = Go2Joint[LegID["FR_1"]]
-    IsaacGymJoint[6] = Go2Joint[LegID["RL_1"]]
-    IsaacGymJoint[7] = Go2Joint[LegID["RR_1"]]
-    IsaacGymJoint[8] = Go2Joint[LegID["FL_2"]]
-    IsaacGymJoint[9] = Go2Joint[LegID["FR_2"]]
-    IsaacGymJoint[10] = Go2Joint[LegID["RL_2"]]
+    IsaacGymJoint[1] = Go2Joint[LegID["FL_1"]]
+    IsaacGymJoint[2] = Go2Joint[LegID["FL_2"]]
+    IsaacGymJoint[3] = Go2Joint[LegID["FR_0"]]
+    IsaacGymJoint[4] = Go2Joint[LegID["FR_1"]]
+    IsaacGymJoint[5] = Go2Joint[LegID["FR_2"]]
+    IsaacGymJoint[6] = Go2Joint[LegID["RL_0"]]
+    IsaacGymJoint[7] = Go2Joint[LegID["RL_1"]]
+    IsaacGymJoint[8] = Go2Joint[LegID["RL_2"]]
+    IsaacGymJoint[9] = Go2Joint[LegID["RR_0"]]
+    IsaacGymJoint[10] = Go2Joint[LegID["RR_1"]]
     IsaacGymJoint[11] = Go2Joint[LegID["RR_2"]]
     return IsaacGymJoint
 
@@ -187,12 +203,12 @@ class ObsHandler(object):
         base_lin_vel_w = self.velocity[-1]
         ang_vel_w, quat, joint_angle, joint_vel = self.getStateFromLowLevelMsg(self.lowStateQueue[-1])
         obs = np.empty([1, 48])
-        obs[:, :3] = base_lin_vel_w # quaternion_inverse_rotate(quat, )
-        obs[:, 3:6] = ang_vel_w # quaternion_inverse_rotate(quat, )
+        obs[:, :3] = 2.0 * np.array(base_lin_vel_w) # quaternion_inverse_rotate(quat, )
+        obs[:, 3:6] = 0.25 * np.array(ang_vel_w) # quaternion_inverse_rotate(quat, )
         obs[:, 6:9] = quaternion_inverse_rotate(quat, np.array([0.0, 0.0, -1.0]))
-        obs[:, 9:12] = velo_command
+        obs[:, 9:12] = np.multiply(np.array([2.0, 2.0, 0.25]), velo_command)
         obs[:, 12:24] = convertJointOrderGo2ToIsaac(joint_angle) - ISAAC_OFFSET
-        obs[:, 24:36] = convertJointOrderGo2ToIsaac(joint_vel)
+        obs[:, 24:36] = convertJointOrderGo2ToIsaac(joint_vel) * 0.05
         obs[:, 36:48] = self.last_action
         return obs
     
@@ -259,17 +275,19 @@ class Controller(object):
             self.sportsModeDisabled = True
     
     def controlIsaacAction(self, action):
+        action = np.clip(action, a_min=JOINT_LIMIT_LOW, a_max=JOINT_LIMIT_HIGH)
         go2Action = self.convertIsaacAction2Go2Action(action)
         self.controlGo2Action(go2Action)
     
     def controlGo2Action(self, action):
-
+        kps = [20, 30, 50]
+        kds = [1.0, 1.0, 2.0]
         # Poinstion(rad) control, set RL_0 rad
         for i, joint_pos in enumerate(action):
             self.cmd.motor_cmd[i].q = joint_pos  # Taregt angular(rad)
-            self.cmd.motor_cmd[i].kp = 35.0  # Poinstion(rad) control kp gain
+            self.cmd.motor_cmd[i].kp = kps [i % 3 ] # Poinstion(rad) control kp gain
             self.cmd.motor_cmd[i].dq = 0.0  # Taregt angular velocity(rad/ss)
-            self.cmd.motor_cmd[i].kd = 0.2  # Poinstion(rad) control kd gain
+            self.cmd.motor_cmd[i].kd = kds [i % 3]  # Poinstion(rad) control kd gain
             self.cmd.motor_cmd[i].tau = 0.0  # Feedforward toque 1N.m
 
         self.cmd.crc = crc.Crc(self.cmd)
@@ -321,7 +339,7 @@ class Controller(object):
         while True:
 
             # Poinstion(rad) control, set RL_0 rad
-            for i, joint_pos in enumerate(LegID.keys()):
+            for i, joint_pos in enumerate(range(12)):
                 self.cmd.motor_cmd[i].q = 0.0  # Taregt angular(rad)
                 self.cmd.motor_cmd[i].kp = 0.0  # Poinstion(rad) control kp gain
                 self.cmd.motor_cmd[i].dq = 0.0  # Taregt angular velocity(rad/ss)
@@ -363,9 +381,12 @@ if __name__ == "__main__":
             # pass
             break
         else:
-            print("Current State:", obs_handle.get_state(velo_command=[0.0,0.0,0.0])[0])
-            action = obs_handle.get_action(velo_command=[0.8,0.0,0.0])
-            print("Current Action: ", action)
+            print("Current State:", 
+                  obs_handle.get_joint_pos()
+                #   obs_handle.get_state(velo_command=[0.0,0.0,0.0])[0]
+                  )
+            # action = obs_handle.get_action(velo_command=[0.8,0.0,0.0])
+            # print("Current Action: ", action)
             # obs_handle.update_action(action)
             print("Press Space for emergency stop, 1 to exit, other to proceed.")
         time.sleep(0.005)  # Adding a small delay to avoid high CPU usage
@@ -373,14 +394,14 @@ if __name__ == "__main__":
     while True:
         key = get_key(key_settings)
         emergency_stop(key)
-        isaacAction = obs_handle.get_action(velo_command=[0.6, 0.0, 0.0])
+        isaacAction = obs_handle.get_action(velo_command=[0.0, 0.0, 0.0])
         go2Action = controller.convertIsaacAction2Go2Action(isaacAction)
-        # jointAngles = obs_handle.get_joint_pos()
+        jointAngles = obs_handle.get_joint_pos()
         controller.verifySportsMode()
         controller.controlIsaacAction(isaacAction)
-        # print('Diff GO2:', jointAngles - go2Action)
+        print('Diff GO2:', jointAngles - go2Action)
         # print('Action isaac:',isaacAction)
-        print(obs_handle.get_state())
+        # print(obs_handle.get_state())
         obs_handle.update_action(isaacAction)
         time.sleep(0.02)
 
