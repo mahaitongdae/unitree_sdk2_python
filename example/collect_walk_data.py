@@ -5,18 +5,21 @@ from unitree_sdk2py.core.channel import ChannelSubscriber, ChannelFactoryInitial
 from unitree_sdk2py.idl.default import unitree_go_msg_dds__SportModeState_
 from unitree_sdk2py.idl.unitree_go.msg.dds_ import SportModeState_, LowState_
 from collections import deque
-import keyboard
+# import keyboard
 import onnxruntime as ort
 from unitree_sdk2py.go2.robot_state.robot_state_client import RobotStateClient
 from unitree_sdk2py.core.channel import ChannelPublisher
 from unitree_sdk2py.idl.default import unitree_go_msg_dds__LowCmd_
 from unitree_sdk2py.idl.unitree_go.msg.dds_ import LowCmd_
+from unitree_sdk2py.go2.sport.sport_client import SportClient
+from high_level.high_commander import HighLevelCommander
 import numpy as np
 from unitree_sdk2py.utils.crc import CRC
 import select
 import sys
 import termios
 import tty
+import threading
 
 LegID = {
     "FR_0": 0,  # Front right hip
@@ -51,7 +54,7 @@ DT = 1./FREQ
 
 
 
-DOG_NAME = 'enxa0cec86c58dc'
+DOG_NAME = 'eth0'
 crc = CRC()
 
 JOINT_LIMIT = np.array([       # Hip, Thigh, Calf
@@ -59,15 +62,20 @@ JOINT_LIMIT = np.array([       # Hip, Thigh, Calf
         [1.047,     2.966,       -0.837]  # MAX
     ])
 
+ISAAC_OFFSET = np.array([       # Hip, Thigh, Calf
+        0.1, 0.8, -1.5,     # FL
+        -0.1, 0.8, -1.5,    # FR
+        0.1, 1.0, -1.5,     # RL
+        -0.1, 1.0, -1.5,    # RR
+    ])
+
 def emergency_stop(key): 
     if key == ' ':
-        code = controller.rsc.ServiceSwitch("sport_mode", False)
+        code = obs_handle.highCommander.client.StopMove()
         if code != 0:
             print("service stop sport_mode error. code:", code)
         else:
             print("service stop sport_mode success. code:", code)
-        for _ in range(20):
-            controller.soft_emergency_stop()
         print('exit')
         sys.exit(0)
     elif key == '1':
@@ -114,38 +122,39 @@ def convertJointOrderIsaacToGo2(IsaacGymJoint):
     '''
     Go2Joint = np.empty_like(IsaacGymJoint)
     Go2Joint[LegID["FL_0"]] = IsaacGymJoint[0]
-    Go2Joint[LegID["FR_0"]] = IsaacGymJoint[1]
-    Go2Joint[LegID["RL_0"]] = IsaacGymJoint[2]
-    Go2Joint[LegID["RR_0"]] = IsaacGymJoint[3]
-    Go2Joint[LegID["FL_1"]] = IsaacGymJoint[4]
-    Go2Joint[LegID["FR_1"]] = IsaacGymJoint[5]
-    Go2Joint[LegID["RL_1"]] = IsaacGymJoint[6]
-    Go2Joint[LegID["RR_1"]] = IsaacGymJoint[7]
-    Go2Joint[LegID["FL_2"]] = IsaacGymJoint[8]
-    Go2Joint[LegID["FR_2"]] = IsaacGymJoint[9]
-    Go2Joint[LegID["RL_2"]] = IsaacGymJoint[10]
+    Go2Joint[LegID["FL_1"]] = IsaacGymJoint[1]
+    Go2Joint[LegID["FL_2"]] = IsaacGymJoint[2]
+    Go2Joint[LegID["FR_0"]] = IsaacGymJoint[3]
+    Go2Joint[LegID["FR_1"]] = IsaacGymJoint[4]
+    Go2Joint[LegID["FR_2"]] = IsaacGymJoint[5]
+    Go2Joint[LegID["RL_0"]] = IsaacGymJoint[6]
+    Go2Joint[LegID["RL_1"]] = IsaacGymJoint[7]
+    Go2Joint[LegID["RL_2"]] = IsaacGymJoint[8]
+    Go2Joint[LegID["RR_0"]] = IsaacGymJoint[9]
+    Go2Joint[LegID["RR_1"]] = IsaacGymJoint[10]
     Go2Joint[LegID["RR_2"]] = IsaacGymJoint[11]
     return Go2Joint
 
 def convertJointOrderGo2ToIsaac(Go2Joint):
     '''
-    isaac gym: flhip, frhip, rlhip, rrhip,
-                flthigh, frthigh, rlthigh, rrthigh,
-                fl, fr, rl, rr calf
+    isaac gym: FLhip, flthigh, flcalf;
+               FR;
+               RL;
+               RR
     go2: 0 for hip, 1 for thigh, 2 for calf
     '''
     IsaacGymJoint = np.empty_like(Go2Joint)
     IsaacGymJoint[0] = Go2Joint[LegID["FL_0"]]
-    IsaacGymJoint[1] = Go2Joint[LegID["FR_0"]]
-    IsaacGymJoint[2] = Go2Joint[LegID["RL_0"]]
-    IsaacGymJoint[3] = Go2Joint[LegID["RR_0"]]
-    IsaacGymJoint[4] = Go2Joint[LegID["FL_1"]]
-    IsaacGymJoint[5] = Go2Joint[LegID["FR_1"]]
-    IsaacGymJoint[6] = Go2Joint[LegID["RL_1"]]
-    IsaacGymJoint[7] = Go2Joint[LegID["RR_1"]]
-    IsaacGymJoint[8] = Go2Joint[LegID["FL_2"]]
-    IsaacGymJoint[9] = Go2Joint[LegID["FR_2"]]
-    IsaacGymJoint[10] = Go2Joint[LegID["RL_2"]]
+    IsaacGymJoint[1] = Go2Joint[LegID["FL_1"]]
+    IsaacGymJoint[2] = Go2Joint[LegID["FL_2"]]
+    IsaacGymJoint[3] = Go2Joint[LegID["FR_0"]]
+    IsaacGymJoint[4] = Go2Joint[LegID["FR_1"]]
+    IsaacGymJoint[5] = Go2Joint[LegID["FR_2"]]
+    IsaacGymJoint[6] = Go2Joint[LegID["RL_0"]]
+    IsaacGymJoint[7] = Go2Joint[LegID["RL_1"]]
+    IsaacGymJoint[8] = Go2Joint[LegID["RL_2"]]
+    IsaacGymJoint[9] = Go2Joint[LegID["RR_0"]]
+    IsaacGymJoint[10] = Go2Joint[LegID["RR_1"]]
     IsaacGymJoint[11] = Go2Joint[LegID["RR_2"]]
     return IsaacGymJoint
 
@@ -153,9 +162,11 @@ class ObsHandler(object):
     
     def __init__(self) -> None:
         self.highStateSub = ChannelSubscriber("rt/sportmodestate", SportModeState_)
+       
         # rsc = RobotStateClient()
         # rsc.SetTimeout(3.0)
         # rsc.Init()
+        self.highCommander = HighLevelCommander()
         self.velocity = deque(maxlen=5)
         self.lowStateQueue = deque(maxlen=5)
 
@@ -169,6 +180,11 @@ class ObsHandler(object):
         self.scale = 0.25
         self.last_state = None
         self.last_joint_angle = None
+
+        # handling data
+        self.stop_event = threading.Event()
+        self.start_data_event = threading.Event()
+
         self.lowStateSub = ChannelSubscriber("rt/lowstate", LowState_)
         self.highStateSub.Init(self.HighStateHandler, 10)
         self.lowStateSub.Init(self.LowStateHandler, 10)
@@ -188,18 +204,19 @@ class ObsHandler(object):
         joint_vel = [msg.motor_state[id].dq for id in range(12)]
         return ang_vel, quat, joint_angle, joint_vel
 
-    def get_state(self):
+    def get_state(self, velo_command = np.array([0.3, 0.3, 0.3])):
         # base_lin_vel_b
         base_lin_vel_w = self.velocity[-1]
         ang_vel_w, quat, joint_angle, joint_vel = self.getStateFromLowLevelMsg(self.lowStateQueue[-1])
-        obs = np.empty([1, 33])
-        obs[:, :3] = base_lin_vel_w
-        obs[:, 3:6] = ang_vel_w
+        obs = np.empty([1, 48])
+        obs[:, :3] = 2.0 * np.array(base_lin_vel_w) # quaternion_inverse_rotate(quat, )
+        obs[:, 3:6] = 0.25 * np.array(ang_vel_w) # quaternion_inverse_rotate(quat, )
         obs[:, 6:9] = quaternion_inverse_rotate(quat, np.array([0.0, 0.0, -1.0]))
-        # obs[:, 9:12] = velo_command
-        obs[:, 9:21] = joint_angle - STAND # relative obs # convertJointOrderGo2ToIsaac(joint_angle)
-        obs[:, 21:33] = joint_vel # convertJointOrderGo2ToIsaac(joint_vel)
-        return obs, joint_angle
+        obs[:, 9:12] = np.multiply(np.array([2.0, 2.0, 0.25]), velo_command)
+        obs[:, 12:24] = convertJointOrderGo2ToIsaac(joint_angle) - ISAAC_OFFSET
+        obs[:, 24:36] = convertJointOrderGo2ToIsaac(joint_vel) * 0.05
+        obs[:, 36:48] = self.last_action
+        return obs
     
     def get_joint_diff(self, joint_pos):
         diff = []
@@ -209,17 +226,46 @@ class ObsHandler(object):
     
     def init_last(self):
         if self.last_state is None:
-            state, joint_pos = self.get_state()
-            self.last_state = state
+            joint_pos = self.get_joint_pos()
             self.last_joint_angle = joint_pos
             time.sleep(DT)
+            '''
+            need to initilalized twice since we have others in the observation.
+            '''
+            self.last_state, self.last_joint_angle = self.get_state()
+            time.sleep(DT)
+
+    def high_level_order(self):
+        '''
+        high-level order to move.
+        '''
+        self.start_data_event.set()
+        print("Starting walk command thread...")
+        while not self.stop_event.is_set():
+            self.highCommander.client.Move(0.5, 0.0, 0.0)  # vx, vy vyaw
+            time.sleep(0.1)  # Send walk command every 0.1 seconds
+
+    # def collect_data(self):
+        
     
+    # # def initial_data_recorder
+
     def get_transition(self):
+        print('Start data collection!')
         states = []
         actions = []
         next_states = []
+        
         self.init_last()
-        for i in range(1000):
+        start = time.time()
+        self.highCommander.client.Move(0.5, 0.0, 0.0)
+        for i in range(500):
+            key = get_key(key_settings)
+            if key == ' ':
+                self.highCommander.client.StopMove()
+                break
+            if i % 10 == 0:
+                self.highCommander.client.Move(0.5, 0.0, 0.0)
             state = self.last_state
             next_state, joint_angle = self.get_state()
             action = self.get_joint_diff(joint_angle)
@@ -229,6 +275,8 @@ class ObsHandler(object):
             self.last_state = next_state
             self.last_joint_angle = joint_angle
             time.sleep(DT)
+        self.highCommander.client.StopMove()
+        print(f"Collection finished! time cost: {time.time() - start}")
         states = np.concatenate(states, axis=0)
         actions = np.vstack(actions)
         next_states = np.concatenate(next_states, axis=0)
@@ -238,6 +286,7 @@ class ObsHandler(object):
         np.savez_compressed(f'{filename}.npz', expert_state=states, 
                             expert_actions=actions, expert_next_states=next_states)
         print(f"Arrays saved to {filename}.npz")
+        
            
     
     def get_joint_pos(self):
@@ -328,8 +377,8 @@ class Controller(object):
     
     def convertIsaacAction2Go2Action(self, isaacAction):
         scaled_action = 0.25 * isaacAction
-        abs_action = scaled_action + self.offsetIsaac
-        absActionGo2 = convertJointOrderIsaacToGo2(scaled_action)
+        abs_action = scaled_action + ISAAC_OFFSET
+        absActionGo2 = convertJointOrderIsaacToGo2(abs_action)
         return absActionGo2
 
     def stop(self):
@@ -417,7 +466,7 @@ if __name__ == "__main__":
             _, joint = obs_handle.get_state()
             print("Current joint:", joint)
             print("Joint diff:", obs_handle.get_joint_diff(joint))
-            print("Press Space for emergency stop, 1 to exit, other to proceed.")
+            print("Press Space for stop, 1 to exit, other to proceed.")
         time.sleep(DT)  # Adding a small delay to avoid high CPU usage
     print('Start to walk')
     first_run = True
@@ -428,21 +477,13 @@ if __name__ == "__main__":
             obs_handle.init_last()
             first_run = False
             print("initialize")
-            print("Press Space for emergency stop, 1 to exit, r to start collection")
+            print("Press Space for stop, 1 to exit, r to start collection")
         if key == 'r':
             start = time.time()
             obs_handle.get_transition()
-            Print(f"Collection finished! time cost: {time.time() - start}")
+            print(f"Collection finished! time cost: {time.time() - start}")
         else:
             pass
-        # isaacAction = obs_handle.get_action(velo_command=[0.0, 0.3, 0.0])
-        # go2Action = controller.convertIsaacAction2Go2Action(isaacAction)
-        # jointAngles = obs_handle.get_joint_pos()
-        # # controller.controlIsaacAction(isaacAction)
-        # print('Diff GO2:', jointAngles - go2Action)
-        # print('Action isaac:',isaacAction)
-        # # print(obs_handle.get_state())
-        # obs_handle.update_action(isaacAction)
         time.sleep(0.02)
 
 

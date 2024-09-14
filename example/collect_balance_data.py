@@ -114,38 +114,39 @@ def convertJointOrderIsaacToGo2(IsaacGymJoint):
     '''
     Go2Joint = np.empty_like(IsaacGymJoint)
     Go2Joint[LegID["FL_0"]] = IsaacGymJoint[0]
-    Go2Joint[LegID["FR_0"]] = IsaacGymJoint[1]
-    Go2Joint[LegID["RL_0"]] = IsaacGymJoint[2]
-    Go2Joint[LegID["RR_0"]] = IsaacGymJoint[3]
-    Go2Joint[LegID["FL_1"]] = IsaacGymJoint[4]
-    Go2Joint[LegID["FR_1"]] = IsaacGymJoint[5]
-    Go2Joint[LegID["RL_1"]] = IsaacGymJoint[6]
-    Go2Joint[LegID["RR_1"]] = IsaacGymJoint[7]
-    Go2Joint[LegID["FL_2"]] = IsaacGymJoint[8]
-    Go2Joint[LegID["FR_2"]] = IsaacGymJoint[9]
-    Go2Joint[LegID["RL_2"]] = IsaacGymJoint[10]
+    Go2Joint[LegID["FL_1"]] = IsaacGymJoint[1]
+    Go2Joint[LegID["FL_2"]] = IsaacGymJoint[2]
+    Go2Joint[LegID["FR_0"]] = IsaacGymJoint[3]
+    Go2Joint[LegID["FR_1"]] = IsaacGymJoint[4]
+    Go2Joint[LegID["FR_2"]] = IsaacGymJoint[5]
+    Go2Joint[LegID["RL_0"]] = IsaacGymJoint[6]
+    Go2Joint[LegID["RL_1"]] = IsaacGymJoint[7]
+    Go2Joint[LegID["RL_2"]] = IsaacGymJoint[8]
+    Go2Joint[LegID["RR_0"]] = IsaacGymJoint[9]
+    Go2Joint[LegID["RR_1"]] = IsaacGymJoint[10]
     Go2Joint[LegID["RR_2"]] = IsaacGymJoint[11]
     return Go2Joint
 
 def convertJointOrderGo2ToIsaac(Go2Joint):
     '''
-    isaac gym: flhip, frhip, rlhip, rrhip,
-                flthigh, frthigh, rlthigh, rrthigh,
-                fl, fr, rl, rr calf
+    isaac gym: FLhip, flthigh, flcalf;
+               FR;
+               RL;
+               RR
     go2: 0 for hip, 1 for thigh, 2 for calf
     '''
     IsaacGymJoint = np.empty_like(Go2Joint)
     IsaacGymJoint[0] = Go2Joint[LegID["FL_0"]]
-    IsaacGymJoint[1] = Go2Joint[LegID["FR_0"]]
-    IsaacGymJoint[2] = Go2Joint[LegID["RL_0"]]
-    IsaacGymJoint[3] = Go2Joint[LegID["RR_0"]]
-    IsaacGymJoint[4] = Go2Joint[LegID["FL_1"]]
-    IsaacGymJoint[5] = Go2Joint[LegID["FR_1"]]
-    IsaacGymJoint[6] = Go2Joint[LegID["RL_1"]]
-    IsaacGymJoint[7] = Go2Joint[LegID["RR_1"]]
-    IsaacGymJoint[8] = Go2Joint[LegID["FL_2"]]
-    IsaacGymJoint[9] = Go2Joint[LegID["FR_2"]]
-    IsaacGymJoint[10] = Go2Joint[LegID["RL_2"]]
+    IsaacGymJoint[1] = Go2Joint[LegID["FL_1"]]
+    IsaacGymJoint[2] = Go2Joint[LegID["FL_2"]]
+    IsaacGymJoint[3] = Go2Joint[LegID["FR_0"]]
+    IsaacGymJoint[4] = Go2Joint[LegID["FR_1"]]
+    IsaacGymJoint[5] = Go2Joint[LegID["FR_2"]]
+    IsaacGymJoint[6] = Go2Joint[LegID["RL_0"]]
+    IsaacGymJoint[7] = Go2Joint[LegID["RL_1"]]
+    IsaacGymJoint[8] = Go2Joint[LegID["RL_2"]]
+    IsaacGymJoint[9] = Go2Joint[LegID["RR_0"]]
+    IsaacGymJoint[10] = Go2Joint[LegID["RR_1"]]
     IsaacGymJoint[11] = Go2Joint[LegID["RR_2"]]
     return IsaacGymJoint
 
@@ -194,15 +195,15 @@ class ObsHandler(object):
         #     print("pause one time step to init last state")
         base_lin_vel_w = self.velocity[-1]
         ang_vel_w, quat, joint_angle, joint_vel = self.getStateFromLowLevelMsg(self.lowStateQueue[-1])
-        obs = np.empty([1, 46])
-        obs[:, :3] = base_lin_vel_w
-        obs[:, 3:6] = ang_vel_w
-        obs[:, 6:10] = quat # quaternion_inverse_rotate(quat, np.array([0.0, 0.0, -1.0]))
-        # obs[:, 9:12] = velo_command
-        obs[:, 10:22] = joint_angle #  - STAND # relative obs # convertJointOrderGo2ToIsaac(joint_angle)
-        obs[:, 22:34] = joint_vel # convertJointOrderGo2ToIsaac(joint_vel)
-        obs[:, 34:46] = np.array(joint_angle) - np.array(self.last_joint_angle)
-        return obs, joint_angle
+        obs = np.empty([1, 48])
+        obs[:, :3] = 2.0 * np.array(base_lin_vel_w) # quaternion_inverse_rotate(quat, )
+        obs[:, 3:6] = 0.25 * np.array(ang_vel_w) # quaternion_inverse_rotate(quat, )
+        obs[:, 6:9] = quaternion_inverse_rotate(quat, np.array([0.0, 0.0, -1.0]))
+        obs[:, 9:12] = np.multiply(np.array([2.0, 2.0, 0.25]), velo_command)
+        obs[:, 12:24] = convertJointOrderGo2ToIsaac(joint_angle) - ISAAC_OFFSET
+        obs[:, 24:36] = convertJointOrderGo2ToIsaac(joint_vel) * 0.05
+        obs[:, 36:48] = self.last_action
+        return obs
     
     def get_joint_diff(self, joint_pos):
         diff = []
@@ -338,8 +339,8 @@ class Controller(object):
     
     def convertIsaacAction2Go2Action(self, isaacAction):
         scaled_action = 0.25 * isaacAction
-        abs_action = scaled_action + self.offsetIsaac
-        absActionGo2 = convertJointOrderIsaacToGo2(scaled_action)
+        abs_action = scaled_action + ISAAC_OFFSET
+        absActionGo2 = convertJointOrderIsaacToGo2(abs_action)
         return absActionGo2
 
     def stop(self):
@@ -441,9 +442,9 @@ if __name__ == "__main__":
             print("initialize")
             print("Press Space for emergency stop, 1 to exit, r to start collection")
         if key == 'r':
-            
+            start = time.time()
             obs_handle.get_transition()
-            
+            print(f"Collection finished! time cost: {time.time() - start}")
         else:
             pass
         # isaacAction = obs_handle.get_action(velo_command=[0.0, 0.3, 0.0])

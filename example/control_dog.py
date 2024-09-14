@@ -32,6 +32,16 @@ LegID = {
     "RL_1": 10,
     "RL_2": 11,
 }
+KPS = [20, 30, 70, # FR
+       20, 30, 70, # FL
+       20, 30, 50, # RR
+       20, 30, 50] # RL
+KDS = [1.0, 1.0, 2.0,
+       1.0, 1.0, 2.0,
+       1.0, 1.0, 2.0,
+       1.0, 1.0, 2.0]
+
+
 onnx_model_path = './model/onnx/policy_isgym_091313.onnx'
 HIGHLEVEL = 0xEE
 LOWLEVEL = 0xFF
@@ -280,14 +290,13 @@ class Controller(object):
         self.controlGo2Action(go2Action)
     
     def controlGo2Action(self, action):
-        kps = [20, 30, 50]
-        kds = [1.0, 1.0, 2.0]
+        
         # Poinstion(rad) control, set RL_0 rad
         for i, joint_pos in enumerate(action):
             self.cmd.motor_cmd[i].q = joint_pos  # Taregt angular(rad)
-            self.cmd.motor_cmd[i].kp = kps [i % 3 ] # Poinstion(rad) control kp gain
+            self.cmd.motor_cmd[i].kp = KPS[i] # Poinstion(rad) control kp gain
             self.cmd.motor_cmd[i].dq = 0.0  # Taregt angular velocity(rad/ss)
-            self.cmd.motor_cmd[i].kd = kds [i % 3]  # Poinstion(rad) control kd gain
+            self.cmd.motor_cmd[i].kd = KDS[i]  # Poinstion(rad) control kd gain
             self.cmd.motor_cmd[i].tau = 0.0  # Feedforward toque 1N.m
 
         self.cmd.crc = crc.Crc(self.cmd)
