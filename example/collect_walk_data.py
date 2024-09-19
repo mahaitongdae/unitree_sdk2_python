@@ -20,6 +20,7 @@ import sys
 import termios
 import tty
 import threading
+import datetime
 
 LegID = {
     "FR_0": 0,  # Front right hip
@@ -162,7 +163,7 @@ class ObsHandler(object):
     
     def __init__(self) -> None:
         self.highStateSub = ChannelSubscriber("rt/sportmodestate", SportModeState_)
-       
+        self.velo_command = [0.5, 0.0, 0.0]
         # rsc = RobotStateClient()
         # rsc.SetTimeout(3.0)
         # rsc.Init()
@@ -172,9 +173,9 @@ class ObsHandler(object):
 
         self.last_action = [0.0] * 12
         
-        self.session = ort.InferenceSession(onnx_model_path)
+        # self.session = ort.InferenceSession(onnx_model_path)
         # Get the model's input name
-        self.input_name = self.session.get_inputs()[0].name
+        # self.input_name = self.session.get_inputs()[0].name
         # self.offsetGo2 = convertJointOrderIsaacToGo2(self.offsetIsaac)
         # print(self.offsetGo2)
         self.scale = 0.25
@@ -182,8 +183,8 @@ class ObsHandler(object):
         self.last_joint_angle = None
 
         # handling data
-        self.stop_event = threading.Event()
-        self.start_data_event = threading.Event()
+        # self.stop_event = threading.Event()
+        # self.start_data_event = threading.Event()
 
         self.lowStateSub = ChannelSubscriber("rt/lowstate", LowState_)
         self.highStateSub.Init(self.HighStateHandler, 10)
@@ -202,12 +203,13 @@ class ObsHandler(object):
         quat = msg.imu_state.quaternion
         joint_angle = [msg.motor_state[id].q for id in range(12)]
         joint_vel = [msg.motor_state[id].dq for id in range(12)]
-        return ang_vel, quat, joint_angle, joint_vel
+        joint_torque = [msg.motor_state[id].tau_est for id in range(12)]
+        return ang_vel, quat, joint_angle, joint_vel, joint_torque
 
     def get_state(self, velo_command = np.array([0.3, 0.3, 0.3])):
         # base_lin_vel_b
         base_lin_vel_w = self.velocity[-1]
-        ang_vel_w, quat, joint_angle, joint_vel = self.getStateFromLowLevelMsg(self.lowStateQueue[-1])
+        ang_vel_w, quat, joint_angle, joint_vel, joint_torque = self.getStateFromLowLevelMsg(self.lowStateQueue[-1])
         obs = np.empty([1, 48])
         obs[:, :3] = 2.0 * np.array(base_lin_vel_w) # quaternion_inverse_rotate(quat, )
         obs[:, 3:6] = 0.25 * np.array(ang_vel_w) # quaternion_inverse_rotate(quat, )
@@ -216,12 +218,12 @@ class ObsHandler(object):
         obs[:, 12:24] = convertJointOrderGo2ToIsaac(joint_angle) - ISAAC_OFFSET
         obs[:, 24:36] = convertJointOrderGo2ToIsaac(joint_vel) * 0.05
         obs[:, 36:48] = self.last_action
-        return obs
+        return obs, joint_angle
     
     def get_joint_diff(self, joint_pos):
         diff = []
-        for i in range(len(joint)):
-            diff.append(joint[i] - self.last_joint_angle[i])
+        for i in range(len(joint_pos)):
+            diff.append(joint_pos[i] - self.last_joint_angle[i])
         return diff
     
     def init_last(self):
@@ -232,57 +234,64 @@ class ObsHandler(object):
             '''
             need to initilalized twice since we have others in the observation.
             '''
-            self.last_state, self.last_joint_angle = self.get_state()
+            self.last_state, self.last_joint_angle = self.get_state(velo_command=np.array(self.velo_command))
             time.sleep(DT)
+            print("fnish last state loggings")
 
     def high_level_order(self):
         '''
         high-level order to move.
         '''
-        self.start_data_event.set()
+        self.start_data_event.wait()
         print("Starting walk command thread...")
         while not self.stop_event.is_set():
-            self.highCommander.client.Move(0.5, 0.0, 0.0)  # vx, vy vyaw
+            key = get_key(key_settings)
+            if key == ' ':
+                self.highCommander.client.StopMove()
+                self.stop_event.set()
+            self.highCommander.client.Move(*self.velo_command) 
             time.sleep(0.1)  # Send walk command every 0.1 seconds
 
-    # def collect_data(self):
-        
+    def collect_data(self):
+        print('Start data collection!')
+        self.states = []
+        self.actions = []
+        self.next_states = []
+        self.init_last()
+        self.start_data_event.set()
+        while not self.stop_event.is_set():
+            state = self.last_state
+            next_state, joint_pos = self.get_state(velo_command=np.array(self.velo_command))
+            action = self.get_joint_diff(joint_pos)
+            self.states.append(state)
+            self.actions.append(action)
+            self.next_states.append(next_state)
+            self.last_state = next_state
+            self.last_joint_angle = joint_pos
+            time.sleep(DT)
     
     # # def initial_data_recorder
 
     def get_transition(self):
-        print('Start data collection!')
-        states = []
-        actions = []
-        next_states = []
-        
-        self.init_last()
+        walk_thread = threading.Thread(target=self.high_level_order)
+        data_thread = threading.Thread(target=self.collect_data)
+        self.stop_event = threading.Event()
+        self.start_data_event = threading.Event()
         start = time.time()
-        self.highCommander.client.Move(0.5, 0.0, 0.0)
-        for i in range(500):
-            key = get_key(key_settings)
-            if key == ' ':
-                self.highCommander.client.StopMove()
-                break
-            if i % 10 == 0:
-                self.highCommander.client.Move(0.5, 0.0, 0.0)
-            state = self.last_state
-            next_state, joint_angle = self.get_state()
-            action = self.get_joint_diff(joint_angle)
-            states.append(state)
-            actions.append(action)
-            next_states.append(next_state)
-            self.last_state = next_state
-            self.last_joint_angle = joint_angle
-            time.sleep(DT)
+        walk_thread.start()
+        data_thread.start()
+        time.sleep(8)
+        self.stop_event.set()
         self.highCommander.client.StopMove()
+        walk_thread.join()
+        data_thread.join()
         print(f"Collection finished! time cost: {time.time() - start}")
-        states = np.concatenate(states, axis=0)
-        actions = np.vstack(actions)
-        next_states = np.concatenate(next_states, axis=0)
-        print(states.shape, actions.shape, next_states.shape)
-        print("Collected 1000 transitions!")
-        filename = input("Please enter the filename (without extension): ")
+        states = np.concatenate(self.states, axis=0)
+        actions = np.vstack(self.actions)
+        next_states = np.concatenate(self.next_states, axis=0)
+        print("Collected transitions!", states.shape, actions.shape, next_states.shape)
+        # filename = input("Please enter the filename (without extension): ")
+        filename = datetime.datetime.now().strftime("walk_%m%d_%H%M%S")
         np.savez_compressed(f'{filename}.npz', expert_state=states, 
                             expert_actions=actions, expert_next_states=next_states)
         print(f"Arrays saved to {filename}.npz")
@@ -290,19 +299,19 @@ class ObsHandler(object):
            
     
     def get_joint_pos(self):
-        ang_vel_w, quat, joint_angle, joint_vel = self.getStateFromLowLevelMsg(self.lowStateQueue[-1])
+        ang_vel_w, quat, joint_angle, joint_vel, joint_torque = self.getStateFromLowLevelMsg(self.lowStateQueue[-1])
         return joint_angle
 
-    def onnx_inference(self, input):
-        if len(input.shape) == 0:
-            input = np.expand_dims(input, axis=0)
-        return self.session.run(None, {self.input_name: input})[0][0]
+    # def onnx_inference(self, input):
+    #     if len(input.shape) == 0:
+    #         input = np.expand_dims(input, axis=0)
+    #     return self.session.run(None, {self.input_name: input})[0][0]
 
-    def get_action(self, velo_command = np.array([0.3, 0.3, 0.3])):
-        state = self.get_state(velo_command)
-        output = self.onnx_inference(state.astype(np.float32))
-        # action = self.convert_action(output)
-        return output
+    # def get_action(self, velo_command = np.array([0.3, 0.3, 0.3])):
+    #     state = self.get_state(velo_command)
+    #     output = self.onnx_inference(state.astype(np.float32))
+    #     # action = self.convert_action(output)
+    #     return output
 
     def update_action(self, raw_action):
         self.last_action = raw_action
@@ -463,9 +472,9 @@ if __name__ == "__main__":
             break
         else:
             # print("Current State:", obs_handle.get_state()[0])
-            _, joint = obs_handle.get_state()
-            print("Current joint:", joint)
-            print("Joint diff:", obs_handle.get_joint_diff(joint))
+            _, _, _, _, torque = obs_handle.getStateFromLowLevelMsg(obs_handle.lowStateQueue[-1])
+            print("Current joint:", torque)
+            # print("Joint diff:", obs_handle.get_joint_diff(joint))
             print("Press Space for stop, 1 to exit, other to proceed.")
         time.sleep(DT)  # Adding a small delay to avoid high CPU usage
     print('Start to walk')

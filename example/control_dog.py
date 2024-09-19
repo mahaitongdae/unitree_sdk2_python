@@ -32,17 +32,17 @@ LegID = {
     "RL_1": 10,
     "RL_2": 11,
 }
-KPS = [20, 30, 70, # FR
-       20, 30, 70, # FL
-       20, 30, 50, # RR
-       20, 30, 50] # RL
-KDS = [1.0, 1.0, 2.0,
-       1.0, 1.0, 2.0,
-       1.0, 1.0, 2.0,
-       1.0, 1.0, 2.0]
+KPS = [30, 50, 30, # FR
+       30, 50, 30, # FL
+       30, 50, 30, # RR
+       30, 50, 30] # RL
+KDS = [0.5, 0.5, 0.5,  
+       0.5, 0.5, 0.5,
+       0.5, 0.5, 0.5,
+       0.5,0.5, 0.5]
 
 
-onnx_model_path = './model/onnx/policy_isgym_091313.onnx'
+onnx_model_path = './model/onnx/policy_Sep19_16-01-59_1500_0919-1832.onnx'
 HIGHLEVEL = 0xEE
 LOWLEVEL = 0xFF
 TRIGERLEVEL = 0xF0
@@ -53,6 +53,19 @@ VelStopF = 16000.0
 
 DOG_NAME = 'eth0'
 crc = CRC()
+
+from scipy import signal
+
+class RealTimeLowPassFilter:
+    def __init__(self, cutoff_freq, fs, order=4):
+        nyquist = 0.5 * fs
+        normal_cutoff = cutoff_freq / nyquist
+        self.b, self.a = signal.butter(order, normal_cutoff, btype='low', analog=False)
+        self.zi = signal.lfilter_zi(self.b, self.a)  # Initialize the filter state
+
+    def apply(self, new_data):
+        filtered_data, self.zi = signal.lfilter(self.b, self.a, [new_data], zi=self.zi)
+        return filtered_data[0]
 
 JOINT_LIMIT_LOW = np.array([
         -0.77, -0.663, -2.9,     # FL
@@ -74,10 +87,10 @@ JOINT_LIMIT = np.array([       # Hip, Thigh, Calf
     ])
 
 ISAAC_OFFSET = np.array([       # Hip, Thigh, Calf
-        0.1, 0.8, -1.5,     # FL
-        -0.1, 0.8, -1.5,    # FR
-        0.1, 1.0, -1.5,     # RL
-        -0.1, 1.0, -1.5,    # RR
+        0.0, 0.8, -1.5,     # FL
+        -0.0, 0.8, -1.5,    # FR
+        0.0, 0.8, -1.5,     # RL
+        -0.0, 0.8, -1.5,    # RR
     ])
 
 def emergency_stop(key): 
@@ -206,25 +219,55 @@ class ObsHandler(object):
         quat = msg.imu_state.quaternion
         joint_angle = [msg.motor_state[id].q for id in range(12)]
         joint_vel = [msg.motor_state[id].dq for id in range(12)]
-        return ang_vel, quat, joint_angle, joint_vel
+        joint_torque = [msg.motor_state[id].tau_est for id in range(12)]
+        foot_force = msg.foot_force
+        foot_force[0] = foot_force[0] - 20
+        foot_force[1] = foot_force[1] - 20
+        foot_force[2] = foot_force[2] - 20
+        foot_force = [1 if f > 0 else 0 for f in foot_force]
 
-    def get_state(self, velo_command = np.array([0.3, 0.3, 0.3])):
+        return ang_vel, quat, joint_angle, joint_vel, foot_force, joint_torque
+    
+
+    def get_state(self, velo_command = np.array([0.3, 0.3, 0.3]), contact=True):
         # base_lin_vel_b
         base_lin_vel_w = self.velocity[-1]
-        ang_vel_w, quat, joint_angle, joint_vel = self.getStateFromLowLevelMsg(self.lowStateQueue[-1])
-        obs = np.empty([1, 48])
-        obs[:, :3] = 2.0 * np.array(base_lin_vel_w) # quaternion_inverse_rotate(quat, )
-        obs[:, 3:6] = 0.25 * np.array(ang_vel_w) # quaternion_inverse_rotate(quat, )
+        ang_vel_w, quat, joint_angle, joint_vel, foot_force, _ = self.getStateFromLowLevelMsg(self.lowStateQueue[-1])
+        obs = np.empty([1, 48]) if not contact else np.empty([1, 52])
+        obs[:, :3] = 2.0 *quaternion_inverse_rotate(quat, np.array(base_lin_vel_w))  # 
+        obs[:, 3:6] = 0.25 * quaternion_inverse_rotate(quat, np.array(ang_vel_w)) # 
         obs[:, 6:9] = quaternion_inverse_rotate(quat, np.array([0.0, 0.0, -1.0]))
         obs[:, 9:12] = np.multiply(np.array([2.0, 2.0, 0.25]), velo_command)
         obs[:, 12:24] = convertJointOrderGo2ToIsaac(joint_angle) - ISAAC_OFFSET
         obs[:, 24:36] = convertJointOrderGo2ToIsaac(joint_vel) * 0.05
         obs[:, 36:48] = self.last_action
+        if contact:
+            '''
+            contact force,
+            isaac gym: FL, FR, RL, RR
+            dog:       FR, FL, RR, RL
+            '''
+            obs[:, 48] = foot_force[1]
+            obs[:, 49] = foot_force[0]
+            obs[:, 50] = foot_force[3]
+            obs[:, 51] = foot_force[2]
         return obs
     
     def get_joint_pos(self):
-        ang_vel_w, quat, joint_angle, joint_vel = self.getStateFromLowLevelMsg(self.lowStateQueue[-1])
+        ang_vel_w, quat, joint_angle, joint_vel, _, _ = self.getStateFromLowLevelMsg(self.lowStateQueue[-1])
         return joint_angle
+    
+    def get_tau_est(self):
+        ang_vel_w, quat, joint_angle, joint_vel, _, torque_tau = self.getStateFromLowLevelMsg(self.lowStateQueue[-1])
+        return torque_tau
+    
+    def get_foot_force(self):
+        ang_vel_w, quat, joint_angle, joint_vel, foot_force, _ = self.getStateFromLowLevelMsg(self.lowStateQueue[-1])
+        # foot_force[0] = foot_force[0] - 20
+        # foot_force[1] = foot_force[1] - 20
+        # foot_force[2] = foot_force[2] - 20
+        # foot_force = [1 if f > 0 else 0 for f in foot_force]
+        return foot_force
 
     def onnx_inference(self, input):
         if len(input.shape) == 0:
@@ -234,17 +277,17 @@ class ObsHandler(object):
     def get_action(self, velo_command = np.array([0.3, 0.3, 0.3])):
         state = self.get_state(velo_command)
         isaac_output = self.onnx_inference(state.astype(np.float32))
-        return isaac_output
+        return isaac_output, state
 
     def update_action(self, raw_action):
         self.last_action = raw_action
 
 class Controller(object):
     STAND = np.array([
-        -0.0, 0.8, -1.5,
-        -0.0, 0.8, -1.5,
-        -0.0, 0.8, -1.5,
-        -0.0, 0.8, -1.5
+        -0.0, 0.67, -1.3,
+        -0.0, 0.67, -1.3,
+        -0.0, 0.67, -1.3,
+        -0.0, 0.67, -1.3
     ])
     SIT = np.array([
         -0.0, 1.2, -2.5,
@@ -271,6 +314,7 @@ class Controller(object):
             self.cmd.motor_cmd[i].kd = 0
             self.cmd.motor_cmd[i].tau = 0
         self.sportsModeDisabled = False
+        # self.filter = RealTimeLowPassFilter(cutoff_freq=15, fs=50)
         # self.offsetIsaac = np.array([0.1, -0.1, 0.1, -0.1,
         #                              0.8, 0.8, 1.0, 1.0,
         #                              -1.5, -1.5, -1.5, -1.5])
@@ -284,13 +328,23 @@ class Controller(object):
                 print("service stop sport_mode success. code:", code)
             self.sportsModeDisabled = True
     
+    def EnableSportsMode(self):
+        # if not self.sportsModeDisabled:
+        code = controller.rsc.ServiceSwitch("sport_mode", True)
+        if code != 0:
+            print("service start sport_mode error. code:", code)
+        else:
+            print("service start sport_mode success. code:", code)
+        # self.sportsModeDisabled = True
+    
     def controlIsaacAction(self, action):
-        action = np.clip(action, a_min=JOINT_LIMIT_LOW, a_max=JOINT_LIMIT_HIGH)
         go2Action = self.convertIsaacAction2Go2Action(action)
+        go2Action = np.clip(go2Action, a_min=JOINT_LIMIT_LOW, a_max=  JOINT_LIMIT_HIGH)
         self.controlGo2Action(go2Action)
+        return go2Action
     
     def controlGo2Action(self, action):
-        
+        # self.filter.apply(action)
         # Poinstion(rad) control, set RL_0 rad
         for i, joint_pos in enumerate(action):
             self.cmd.motor_cmd[i].q = joint_pos  # Taregt angular(rad)
@@ -367,6 +421,11 @@ class Controller(object):
             time.sleep(0.002)
 
 if __name__ == "__main__":
+    from csv_logger import CSVLogger
+    # Usage example:
+    # Initialize logger with the filename and the fieldnames (columns)
+    logger = CSVLogger('log_fr_calf.csv', fieldnames=['joint_pos', 'joint_torque'])
+
     def get_key(settings):
         tty.setraw(sys.stdin.fileno())
         rlist, _, _ = select.select([sys.stdin], [], [], 0.1)
@@ -382,6 +441,7 @@ if __name__ == "__main__":
     obs_handle = ObsHandler()
     time.sleep(2)
     controller = Controller()
+    controller.EnableSportsMode()
     
     while True:
         key = get_key(key_settings)
@@ -390,26 +450,33 @@ if __name__ == "__main__":
             # pass
             break
         else:
-            print("Current State:", 
-                  obs_handle.get_joint_pos()
+            print("Current force:", 
+                  obs_handle.get_tau_est()
                 #   obs_handle.get_state(velo_command=[0.0,0.0,0.0])[0]
                   )
+            ang_vel, quat, joint_angle, joint_vel, foot_force, joint_torque = obs_handle.getStateFromLowLevelMsg(obs_handle.lowStateQueue[-1])
+            logger.log({'joint_pos': joint_angle[2], 'joint_torque': joint_torque[2]})
             # action = obs_handle.get_action(velo_command=[0.8,0.0,0.0])
             # print("Current Action: ", action)
             # obs_handle.update_action(action)
             print("Press Space for emergency stop, 1 to exit, other to proceed.")
-        time.sleep(0.005)  # Adding a small delay to avoid high CPU usage
+        time.sleep(0.01)  # Adding a small delay to avoid high CPU usage
     print('Start to walk')
+    controller.verifySportsMode()
     while True:
         key = get_key(key_settings)
         emergency_stop(key)
-        isaacAction = obs_handle.get_action(velo_command=[0.0, 0.0, 0.0])
+        isaacAction, state = obs_handle.get_action(velo_command=[0.0, 0.0, 0.0])
         go2Action = controller.convertIsaacAction2Go2Action(isaacAction)
-        jointAngles = obs_handle.get_joint_pos()
-        controller.verifySportsMode()
+        jointAngles = obs_handle.get_tau_est()
+        # print(isaacAction)
         controller.controlIsaacAction(isaacAction)
-        print('Diff GO2:', jointAngles - go2Action)
+        # controller.controlGo2Action(controller.STAND)
+        # print('Diff GO2:', jointAngles - go2Action) #  
+        print("joint_angle", jointAngles)
+        # print('State', state)
         # print('Action isaac:',isaacAction)
+        
         # print(obs_handle.get_state())
         obs_handle.update_action(isaacAction)
         time.sleep(0.02)
